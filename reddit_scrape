@@ -22,9 +22,9 @@ class RedditScraperSelenium:
     def init_selenium(self):
         """Initialize the Selenium WebDriver (Chrome)"""
         chrome_options = Options()
-        user_path = r"C:\Users\forrest\AppData\Local\Google\Chrome\User Data\Profile 1"
+        user_path = r"your chrome user path here"
         chrome_options.add_argument("user-data-dir=" + user_path)
-        executable_path = r"Z:\Desktop\chromedriver-win64\chromedriver.exe"
+        executable_path = r"your path to\chromedriver.exe"
         service = Service(executable_path=executable_path)
         driver = webdriver.Chrome(service=service, options=chrome_options)
         return driver
@@ -229,11 +229,11 @@ mode = "posts"  # Choose between 'subreddit', 'posts', or 'usernames'
 if mode == "subreddit":
     # Example: Scraping from a subreddit, capturing 50 posts
     subreddit_url = "https://www.reddit.com/r/tech/"
-    post_urls = reddit_scraper.scrape_subreddit(subreddit_url, post_limit=3)
+    post_urls = reddit_scraper.scrape_subreddit(subreddit_url, post_limit=3) # adjust post limit as needed, fetches first x posts per subreddit landing page.
 
     # Scrape comments from the usernames collected
     usernames = reddit_scraper.scrape_from_post_urls(post_urls)
-    reddit_scraper.scrape_user_comments(usernames, mode="full", save_dir='Z:/Desktop/remote_yolo/ultralytics-main/')
+    reddit_scraper.scrape_user_comments(usernames, mode="full", save_dir='your_directory_here/user_comments') # if mode = "range", add range_size=x
 
 elif mode == "posts":
     # Example: Scraping from a list of post URLs directly
@@ -245,9 +245,9 @@ elif mode == "posts":
     usernames = reddit_scraper.scrape_from_post_urls(post_urls)
 
     # Scrape comments from the usernames collected
-    reddit_scraper.scrape_user_comments(usernames, mode="full", save_dir=r'Z:/Desktop/remote_yolo/ultralytics-main/')
+    reddit_scraper.scrape_user_comments(usernames, mode="full", save_dir=r'your_directory_here/user_comments') # if mode = "range", add range_size=x
 
 elif mode == "usernames":
     # Example: Scraping from a list of usernames
     usernames = ['underscoredashdot', 'FrankTooby', 'turkish3187']  # Input your own list of usernames
-    reddit_scraper.scrape_user_comments(usernames, mode="full", save_dir=r'Z:/Desktop/remote_yolo/ultralytics-main/')
+    reddit_scraper.scrape_user_comments(usernames, mode="full", save_dir=r'your_directory_here/user_comments') # if mode = "range", add range_size=x
