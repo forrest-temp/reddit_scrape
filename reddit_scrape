@@ -1,0 +1,253 @@
+import os
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.options import Options
+from bs4 import BeautifulSoup
+import pandas as pd
+import time
+import random
+from datetime import datetime
+from selenium.common.exceptions import NoSuchElementException
+
+class RedditScraperSelenium:
+    def __init__(self):
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        self.usernames = set()  # Set to store unique usernames
+        self.posts_collected = set()  # Set to store unique post URLs
+
+    def init_selenium(self):
+        """Initialize the Selenium WebDriver (Chrome)"""
+        chrome_options = Options()
+        user_path = r"C:\Users\forrest\AppData\Local\Google\Chrome\User Data\Profile 1"
+        chrome_options.add_argument("user-data-dir=" + user_path)
+        executable_path = r"Z:\Desktop\chromedriver-win64\chromedriver.exe"
+        service = Service(executable_path=executable_path)
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        return driver
+
+    def click_load_more_comments(self, driver):
+        """Click the 'Load More Comments' button if it exists."""
+        try:
+            load_more_button = driver.find_element(By.XPATH, "//button[contains(., 'View more comments')]")
+            load_more_button.click()
+            print("Clicked 'View more comments' button.")
+            time.sleep(2)  # Wait for new comments to load
+        except NoSuchElementException:
+            # No "View more comments" button found
+            pass
+
+    def scroll_to_load_page(self, driver, url):
+        """Scroll down the page until all content is loaded, including handling 'Load More Comments'."""
+        driver.get(url)
+        print(f"Visiting: {url}")
+        last_height = driver.execute_script("return document.body.scrollHeight")
+
+        while True:
+            # Scroll to the bottom of the page
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(3)  # Wait for new content to load
+
+            # Look for "View more comments" button and click it if found
+            self.click_load_more_comments(driver)
+
+            # Calculate new scroll height and compare with the last height
+            new_height = driver.execute_script("return document.body.scrollHeight")
+            if new_height == last_height:
+                break  # If no new content is loaded, stop scrolling
+            last_height = new_height
+
+        # Return the fully loaded page source
+        print(f"Completed scrolling for {url}")
+        return driver.page_source
+
+    ### Step 1: Scraping Post Comments and Collecting Usernames ###
+    def scrape_post_comments(self, post_url):
+        """Scrape usernames from comments of a specific post using Selenium to scroll and load comments."""
+        driver = self.init_selenium()
+        page_source = self.scroll_to_load_page(driver, post_url)
+
+        soup = BeautifulSoup(page_source, 'html.parser')
+        usernames = set()
+
+        # Locate and extract the usernames based on the updated HTML structure
+        comment_authors = soup.find_all('a', href=True)
+        for author in comment_authors:
+            if '/user/' in author['href']:
+                username = author.text.strip()
+                usernames.add(username)
+
+        driver.quit()  # Only quit the WebDriver after extracting the data
+
+        # Debugging: Check if usernames were collected
+        if usernames:
+            print(f"Collected usernames from {post_url}: {usernames}")
+        else:
+            print(f"No usernames collected from {post_url}")
+
+        return list(usernames)
+
+    ### Function to Scrape Multiple Post URLs and Collect Usernames ###
+    def scrape_from_post_urls(self, post_urls):
+        """Scrape usernames from a list of post URLs using Selenium."""
+        all_usernames = set()
+        for post_url in post_urls:
+            if post_url not in self.posts_collected:  # Check if post URL is already processed
+                print(f"Scraping post URL: {post_url}")
+                post_usernames = self.scrape_post_comments(post_url)
+                all_usernames.update(post_usernames)
+                self.posts_collected.add(post_url)  # Mark post as processed
+            else:
+                print(f"Skipping duplicate post URL: {post_url}")
+
+        return list(all_usernames)
+
+    ### Updated Subreddit Scraper with Post Limit ###
+    def scrape_subreddit(self, subreddit_url, post_limit=10):
+        """Scrape the first post_limit number of post URLs from a subreddit without scrolling."""
+        driver = self.init_selenium()
+
+        # Load the subreddit page
+        driver.get(subreddit_url)
+        time.sleep(3)  # Wait for the page to load
+
+        post_urls = []
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+
+        # Locate posts
+        posts = soup.find_all('a', href=True)
+        for post in posts:
+            if '/comments/' in post['href']:
+                full_post_url = f"https://www.reddit.com{post['href']}"
+                if full_post_url not in post_urls:  # Ensure no duplicate post URLs
+                    post_urls.append(full_post_url)
+                    print(f"Collected post: {full_post_url}")
+
+                # Stop once we've gathered the desired number of posts
+                if len(post_urls) >= post_limit:
+                    break
+
+        driver.quit()
+        return post_urls
+
+    ### Step 2: Scraping User Comments from Profiles and Saving to Individual CSVs ###
+    def scrape_user_comments(self, usernames, mode="full", range_size=None, save_dir="comments/"):
+        """Scrape comments from a list of usernames and save each user's comments to their own CSV."""
+        base_url = "https://www.reddit.com/user/"
+        driver = self.init_selenium()  # Initialize the Selenium WebDriver
+
+        for user in usernames:
+            # Check if the user has already been scraped by looking for their CSV file
+            user_filename = f"{save_dir}{user}_comments.csv"
+            if os.path.exists(user_filename):
+                print(f"Skipping {user}, already scraped.")
+                continue  # Skip the user if their CSV file exists
+
+            if user in ['[Unknown]', '[Deleted]']:
+                continue  # Skip deleted or unknown users
+
+            user_url = base_url + user + "/comments"
+            print(f"Fetching comments for user: {user} using Selenium")
+
+            try:
+                # Scroll and load all comments dynamically
+                page_source = self.scroll_to_load_page(driver, user_url)
+                soup = BeautifulSoup(page_source, 'html.parser')
+
+                # Extract user comments from the loaded page
+                comments = soup.find_all('div', {'class': 'md'})  # 'md' class typically holds the comment content
+                comment_count = len(comments)
+
+                user_comments = []
+
+                # Handle different modes of comment scraping
+                if mode == "full":
+                    selected_comments = comments
+                elif mode == "range" and range_size:
+                    selected_comments = comments[:range_size]
+                elif mode == "random_range":
+                    random_count = random.randint(1, comment_count)
+                    selected_comments = comments[:random_count]
+                else:
+                    selected_comments = []
+
+                # Store comments in the final list
+                for comment in selected_comments:
+                    user_comments.append({
+                        'user': user,
+                        'comment': comment.text.strip()
+                    })
+
+                # Save comments to a CSV for the specific user
+                if user_comments:
+                    self.save_user_comments_to_csv(user_comments, user_filename)
+
+                # Debugging: Check if comments were collected
+                if selected_comments:
+                    print(f"Collected {len(selected_comments)} comments from {user}.")
+                else:
+                    print(f"No comments collected from {user}.")
+            except Exception as e:
+                print(f"Error fetching comments for {user}: {e}")
+                continue
+
+            # Add rate limiting delay
+            delay = random.randint(5, 15)  # Random delay to avoid getting blocked
+            print(f"Waiting for {delay} seconds to avoid being blocked...")
+            time.sleep(delay)
+
+        driver.quit()  # Only quit after all users are processed
+
+    def save_user_comments_to_csv(self, user_comments, filename):
+        """Append the user's comments to the CSV file."""
+        df = pd.DataFrame(user_comments)
+        df = df.drop_duplicates()  # Drop duplicates before saving
+        df.to_csv(filename, mode='a', index=False, header=not os.path.exists(filename))  # Only add header if the file doesn't exist
+        print(f"Saved comments to {filename}")
+
+    def save_to_dataframe(self, data, filename):
+        """Save the collected data into a CSV using pandas."""
+        if data:
+            df = pd.DataFrame(data).drop_duplicates()  # Drop duplicates before saving
+            df.to_csv(filename, index=False)
+            print(f"Data saved to {filename}")
+        else:
+            print(f"No data to save to {filename}")
+
+### Example Usage ###
+
+# Initialize the scraper
+reddit_scraper = RedditScraperSelenium()
+
+## Step 1: Input Mode (Subreddit, Posts, or Usernames) ###
+
+mode = "posts"  # Choose between 'subreddit', 'posts', or 'usernames'
+
+if mode == "subreddit":
+    # Example: Scraping from a subreddit, capturing 50 posts
+    subreddit_url = "https://www.reddit.com/r/tech/"
+    post_urls = reddit_scraper.scrape_subreddit(subreddit_url, post_limit=3)
+
+    # Scrape comments from the usernames collected
+    usernames = reddit_scraper.scrape_from_post_urls(post_urls)
+    reddit_scraper.scrape_user_comments(usernames, mode="full", save_dir='Z:/Desktop/remote_yolo/ultralytics-main/')
+
+elif mode == "posts":
+    # Example: Scraping from a list of post URLs directly
+    post_urls = [
+        "https://www.reddit.com/r/tech/comments/1g2yjyd/researchers_develop_method_to_make_sound_waves/",
+        "https://www.reddit.com/r/tech/comments/1g3f1bu/sodium_batteries_commercialization_gets_boost/",
+        "https://www.reddit.com/r/tech/comments/1g0h2nq/us_scientists_turn_waste_streams_into_jet_fuel/"
+    ]
+    usernames = reddit_scraper.scrape_from_post_urls(post_urls)
+
+    # Scrape comments from the usernames collected
+    reddit_scraper.scrape_user_comments(usernames, mode="full", save_dir=r'Z:/Desktop/remote_yolo/ultralytics-main/')
+
+elif mode == "usernames":
+    # Example: Scraping from a list of usernames
+    usernames = ['underscoredashdot', 'FrankTooby', 'turkish3187']  # Input your own list of usernames
+    reddit_scraper.scrape_user_comments(usernames, mode="full", save_dir=r'Z:/Desktop/remote_yolo/ultralytics-main/')
